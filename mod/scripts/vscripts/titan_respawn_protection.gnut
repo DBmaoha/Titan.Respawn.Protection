@@ -184,6 +184,7 @@ void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = nu
     bubbleShield.EndSignal( "OnDestroy" )
     bubbleShield.NotSolid() // this bubble is not solid, only for visual
     thread MonitorBubbleLifetime( player, bubbleShield )
+    thread CheckPlayerVortexWeapon( player )
 
 	player.SetNPCPriorityOverride( 10 )
     if ( PROTECTION_NO_COLLISTION )
@@ -281,6 +282,36 @@ void function MonitorBubbleLifetime( entity player, entity bubbleShield )
     //print( "MonitorBubbleLifetime() Finished" )
 
 	DestroyBubbleShield( bubbleShield )
+}
+
+// vortex weapons won't signal "OnPrimaryAttack", so it requires some hardcode
+const array<string> VORTEX_WEAPONS =
+[
+    "mp_titanweapon_vortex_shield",
+    "mp_titanweapon_vortex_shield_ion",
+    "mp_titanweapon_heat_shield",
+]
+
+void function CheckPlayerVortexWeapon( entity player )
+{
+    player.EndSignal( "OnDeath" )
+	player.EndSignal( "OnDestroy" )
+    player.EndSignal( "TitanProtectionEnd" )
+
+    while ( true )
+    {
+        entity activeWeapon = player.GetActiveWeapon()
+        if ( IsValid( activeWeapon ) )
+        {
+            string className = activeWeapon.GetWeaponClassName()
+            if ( VORTEX_WEAPONS.contains( className ) )
+            {
+                player.Signal( "OnPrimaryAttack" ) // manually signal this, end protection
+                return
+            }
+        }
+        WaitFrame()
+    }
 }
 
 void function UpdatePlayerProtectionMessage( entity player )
