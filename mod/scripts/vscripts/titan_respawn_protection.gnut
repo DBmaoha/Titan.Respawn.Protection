@@ -120,7 +120,7 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
             if ( IsValid( bubbleData.bubbleShield ) ) // clean up the bubble
             {
                 var bubble = bubbleData.bubbleShield
-                expect entity( bubble )
+                expect entity ( bubble )
                 DestroyBubbleShield( bubble )
             }
         }
