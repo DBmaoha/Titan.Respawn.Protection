@@ -30,7 +30,7 @@ const int EXECUTION_DELAY                   = 2
 // 是否允许保护期间自爆
 const bool SUICIDE_ENABLED                  = true
 // 若启用自爆，额外增加的文字提示
-const string SUICIDE_HINT                   = "若对重生点仍不满意，长按 下机 可以进行自爆并重新复活"
+const string SUICIDE_HINT                   = "若对重生点不满意，长按 下机 可以进行自爆并重新复活"
 // 自爆所需的按键时长
 const float SUICIDE_HOLD_TIME               = 1.5
 // 开局多久后复活的玩家才可以选择自爆，单位为秒
@@ -136,7 +136,10 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
     
     // create a bubble here, for passing it to functions below
     int team = titan.GetTeam()
+    TraceResults traceresult = TraceLine( titan.GetOrigin(), titan.GetOrigin() + < 0, 0, -65535 >, titan, (TRACE_MASK_SHOT | CONTENTS_BLOCKLOS), TRACE_COLLISION_GROUP_NONE )
     vector origin = titan.GetOrigin()
+    if ( origin.z > traceresult.endPos.z ) // if the endPos is lower than titan's base origin
+        origin = traceresult.endPos // use the trace instead
     vector angles = titan.GetAngles()
     entity bubble = CreateVisualBubbleShield( titan, team, origin, angles, 9999 )
     
