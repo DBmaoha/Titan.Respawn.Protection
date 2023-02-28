@@ -116,7 +116,7 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
     (
         function(): ( bubbleData )
         {
-            print( "RUNNING OnThreadEnd()" )
+            //print( "RUNNING OnThreadEnd()" )
             if ( IsValid( bubbleData.bubbleShield ) ) // clean up the bubble
             {
                 var bubble = bubbleData.bubbleShield
