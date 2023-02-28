@@ -109,6 +109,23 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
     player.Signal( "TitanRespawnProtection" )
     player.EndSignal( "TitanRespawnProtection" )
 
+    table bubbleData = {} 
+    bubbleData.bubbleShield <- null // we create it later, it has to be a table for we passing the bubble to OnThreadEnd()
+
+    OnThreadEnd
+    (
+        function(): ( bubbleData )
+        {
+            print( "RUNNING OnThreadEnd()" )
+            if ( IsValid( bubbleData.bubbleShield ) ) // clean up the bubble
+            {
+                var bubble = bubbleData.bubbleShield
+                expect entity( bubble )
+                DestroyBubbleShield( bubble )
+            }
+        }
+    )
+
     wait GetHotDropImpactTime( titan, "at_hotdrop_01" ) // this is the animation "RespawnAsTitan()" uses, wait for it
 
     bool suicideEnable = SUICIDE_ENABLED && GameTime_PlayingTime() >= SUICIDE_GRACE_PERIOD
@@ -121,16 +138,19 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
     int team = titan.GetTeam()
     vector origin = titan.GetOrigin()
     vector angles = titan.GetAngles()
-    entity bubbleShield = CreateVisualBubbleShield( titan, team, origin, angles, 9999 )
+    entity bubble = CreateVisualBubbleShield( titan, team, origin, angles, 9999 )
+    
+    bubbleData.bubbleShield = bubble
 
-    waitthread ProtectHotDropNPCTitan( titan, bubbleShield ) // player will be transfered later, so we should protect npc titan temporarily
+    waitthread ProtectHotDropNPCTitan( titan, bubble ) // player will be transfered later, so we should protect npc titan temporarily
     
     if ( !player.IsTitan() ) // player still not respawned as titan, they're just doing titanfall
     {
         //print( "player is not a titan!" ) 
         return
     }
-    thread TryGiveProtectionToPlayer( player, bubbleShield )
+    
+    waitthread TryGiveProtectionToPlayer( player, bubble )
 }
 
 void function ProtectHotDropNPCTitan( entity titan, entity bubbleShield = null )
