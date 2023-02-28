@@ -8,6 +8,8 @@ const float PROTECTION_MAX_TIME             = 20
 const int PROTECTION_MAX_DISTANCE           = 2000
 // 保护期间其他玩家是否会与该玩家产生碰撞，子弹是否可穿过被保护的玩家(玩家本人仍会与其他玩家产生碰撞)
 const bool PROTECTION_NO_COLLISTION         = true
+// 圆顶护罩是否有实质效果，若为否则只有视觉
+const bool PROTECTION_DOME_SOLID            = false
 // 保护期间，玩家为武器充能是否会取消护盾(如镭射炮、能量吸收和电浆磁轨炮)
 const bool CHARGE_BREAKS_PROTECTION         = true
 // 开局多久后复活的玩家才会触发重生保护，单位为秒
@@ -149,7 +151,8 @@ void function ProtectHotDropNPCTitan( entity titan, entity bubbleShield = null )
 
     bubbleShield.EndSignal( "OnDestroy" )
 
-    bubbleShield.NotSolid() // the bubble is actually not solid, so protect the titan manually
+    if ( !PROTECTION_DOME_SOLID )
+        bubbleShield.NotSolid() // the bubble is actually not solid, so protect the titan manually
     titan.SetInvulnerable() // protect the titan
 
     OnThreadEnd
@@ -184,7 +187,8 @@ void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = nu
     if ( !IsValid( bubbleShield ) ) // if we pass a bubble shield, dont create it again
 	    bubbleShield = CreateVisualBubbleShield( player, team, origin, angles, 9999 ) // this bubble won't fade itself, controlled by other functions
     bubbleShield.EndSignal( "OnDestroy" )
-    bubbleShield.NotSolid() // this bubble is not solid, only for visual
+    if ( !PROTECTION_DOME_SOLID )
+        bubbleShield.NotSolid() // this bubble is not solid, only for visual
     thread MonitorBubbleLifetime( player, bubbleShield )
     thread CheckPlayerChargeWeapon( player )
 
@@ -428,7 +432,7 @@ void function PlayerTryTitanSuicide( entity player )
     bool suicideSuccess = false
     while ( player.UseButtonPressed() )
     {
-        SendHudMessage( player, "正在进行自爆... [ " + CreateHudProgressStringThroughTime( Time(), startTime, useTime ) + " ]", -1, -0.3, 255, 255, 100, 255, 0, 0.2, 0 )
+        SendHudMessage( player, "正在进行自爆... [ " + CreateHudProgressStringThroughTime( Time(), startTime, useTime ) + " ]", -1, -0.3, 255, 255, 0, 255, 0, 0.2, 0 )
         if ( Time() > endTime ) // time out!
         {
             suicideSuccess = true // mark as succeeded
@@ -488,6 +492,7 @@ entity function CreateVisualBubbleShield( entity titan, int team, vector origin,
 	bubbleShield.kv.contents = (int(bubbleShield.kv.contents) | CONTENTS_NOGRAPPLE)
 	bubbleShield.SetOrigin( origin )
 	bubbleShield.SetAngles( angles )
+	bubbleShield.kv.CollisionGroup = TRACE_COLLISION_GROUP_BLOCK_WEAPONS // Blocks bullets, projectiles but not players and not AI
 	DispatchSpawn( bubbleShield )
 	bubbleShield.Hide()
 
