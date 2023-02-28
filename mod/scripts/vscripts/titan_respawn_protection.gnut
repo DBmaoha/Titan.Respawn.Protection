@@ -405,18 +405,10 @@ void function PlayerSuicide( entity player )
     player.EndSignal( "OnRespawned" )
 
     player.Die( svGlobal.worldspawn, svGlobal.worldspawn, { damageSourceId = eDamageSourceId.round_end } ) // this damageSource won't trigger titan explosion effects
-    TransferPlayerToSpectator( player ) // prevent titan -> pilot transfering issues
     WaitFrame() // wait a frame so other death functions can set up
-    thread RespawnAsTitan( player ) // respawn as titan again
+    thread ReplacePlayerAsTitan( player ) // respawn as titan again
     if ( player.GetPlayerGameStat( PGS_DEATHS ) )
         player.AddToPlayerGameStat( PGS_DEATHS, -1 ) // remove the death count
-}
-
-void function TransferPlayerToSpectator( entity player )
-{
-    asset model = player.GetModelName()
-    player.SetPlayerSettings( "spectator" ) // prevent titan -> pilot transfering issues
-    player.SetModel( model ) // so they will die as a titan ragdoll
 }
 
 string function CreateHudProgressStringThroughTime( float nowGlobalTime, float startGlobalTime, float totalTime )
@@ -523,4 +515,77 @@ void function CleanupBubbleShield( entity bubbleShield, array<entity> bubbleShie
 	)
 
 	wait fadeTime
+}
+
+// basically same as RespawnAsTitan(), but this one won't do score events
+void function ReplacePlayerAsTitan( entity player )
+{
+	// respawn crash exploit hotfix
+	if ( IsAlive( player ) ) 
+        return
+
+	player.Signal( "PlayerRespawnStarted" )
+
+	player.isSpawning = true
+	entity spawnpoint = FindSpawnPoint( player, true, ( ShouldStartSpawn( player ) || Flag( "ForceStartSpawn" ) ) && !IsFFAGame() )
+
+ 	TitanLoadoutDef titanLoadout = GetTitanLoadoutForPlayer( player )
+	
+	asset model = GetPlayerSettingsAssetForClassName( titanLoadout.setFile, "bodymodel" )
+	Attachment warpAttach = GetAttachmentAtTimeFromModel( model, "at_hotdrop_01", "offset", spawnpoint.GetOrigin(), spawnpoint.GetAngles(), 0 )
+	PlayFX( TURBO_WARP_FX, warpAttach.position, warpAttach.angle )
+		
+	entity titan = CreateAutoTitanForPlayer_FromTitanLoadout( player, titanLoadout, spawnpoint.GetOrigin(), spawnpoint.GetAngles() )
+	DispatchSpawn( titan )
+	player.SetPetTitan( null ) // prevent embark prompt from showing up
+	
+	AddCinematicFlag( player, CE_FLAG_CLASSIC_MP_SPAWNING ) // hide hud
+	
+	entity camera = CreateTitanDropCamera( spawnpoint.GetAngles(), < 90, titan.GetAngles().y, 0 > )
+	camera.SetParent( titan )
+	
+	// calc offset for spawnpoint angle
+	// todo this seems bad but too lazy to figure it out rn
+	//vector xyOffset = RotateAroundOrigin2D( < 44, 0, 0 >, < 0, 0, 0>, spawnpoint.GetAngles().y )
+	//xyOffset.z = 520 // < 44, 0, 520 > at 0,0,0, seems to be the offset used in tf2
+	//print( xyOffset )
+	
+	vector xyOffset = RotateAroundOrigin2D( < 44, 0, 520 >, < 0, 0, 0 >, spawnpoint.GetAngles().y )
+	
+	camera.SetLocalOrigin( xyOffset )
+	camera.SetLocalAngles( < camera.GetAngles().x, spawnpoint.GetAngles().y, camera.GetAngles().z > ) // this straight up just does not work lol
+	camera.Fire( "Enable", "!activator", 0, player )
+	
+	player.EndSignal( "OnDestroy" )
+	titan.EndSignal( "OnDestroy" )
+	OnThreadEnd( function() : ( player, titan, camera )
+	{
+		if ( IsValid( player ) )
+		{
+			RemoveCinematicFlag( player, CE_FLAG_CLASSIC_MP_SPAWNING ) // show hud
+			player.isSpawning = false
+		}
+	
+		if ( IsValid( titan ) )
+			titan.Destroy() // pilotbecomestitan leaves an npc titan that we need to delete
+		else
+			RespawnAsPilot( player ) // this is 100% an edgecase, just avoid softlocking if we ever hit it in playable gamestates
+		
+		camera.Fire( "Disable", "!activator", 0, player )
+		camera.Destroy()
+	})
+	
+	waitthread TitanHotDrop( titan, "at_hotdrop_01", spawnpoint.GetOrigin(), spawnpoint.GetAngles(), player, camera ) // do hotdrop anim
+	
+	player.SetPlayerSettings( "spectator" ) // prevent a crash with going from titan => pilot on respawn
+	player.RespawnPlayer( null ) // spawn player as pilot so they get their pilot loadout on embark
+	player.SetOrigin( titan.GetOrigin() )
+	ClearTitanAvailable( player ) // titanfall succeed, clear titan availability
+	
+	// don't make player titan when entity batteryContainer is not valid.
+	// This will prevent a servercrash that sometimes occur when evac is disabled and somebody is calling a titan in the defeat screen.
+	if( IsValid( titan.GetTitanSoul().soul.batteryContainer ) )
+		PilotBecomesTitan( player, titan ) // make player titan
+	else
+		print( "batteryContainer is not a valid entity in RespawnAsTitan(). Skipping PilotBecomesTitan()." )
 }
