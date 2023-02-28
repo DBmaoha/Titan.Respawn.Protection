@@ -1,0 +1,514 @@
+untyped
+
+global function Titan_Respawn_Protection_Init
+
+// 保护持续时间(为负值则为无限持续，即直至被手动取消会一直存在，为0则关闭)
+const float PROTECTION_MAX_TIME             = 20
+// 玩家最多能携带护盾移动多少距离，这里的单位是游戏内计量单位
+const int PROTECTION_MAX_DISTANCE           = 2000
+// 保护期间其他玩家是否会与该玩家产生碰撞，子弹是否可穿过被保护的玩家(玩家本人仍会与其他玩家产生碰撞)
+const bool PROTECTION_NO_COLLISTION         = true
+
+// 保护时的文字提示(根据显示百分比的设置，将会转为显示玩家的剩余时间和距离)
+const string PROTECTION_HINT                = "启用重生保护：\n你将在第一次开火前保持无敌(不可近战或处决)，可移动一定距离\n"
+// 文字提示被剩余时间替换前最少可以存在多久，可以让玩家在距离设定很低的情况下也看清提示
+const float PROTECTION_HINT_MIN_DURATION    = 8
+// 若保护时间达到了这个百分比，将显示"保护时间剩余"的提示
+const float HINT_TIME_PERCENT               = 0.75
+// 若移动距离达到了这个百分比，将显示"保护距离剩余"的提示
+const float HINT_DISTANCE_PERCENT           = 0.75
+
+// 保护结束后，玩家还需等待多久才可以处决，单位为秒
+const int EXECUTION_DELAY                   = 2
+
+// 是否允许保护期间自爆
+const bool SUICIDE_ENABLED                  = true
+// 若启用自爆，额外增加的文字提示
+const string SUICIDE_HINT                   = "若对重生点仍不满意，长按 下机 可以进行自爆并重新复活"
+// 自爆所需的按键时长
+const float SUICIDE_HOLD_TIME               = 1.5
+
+// 在这里写队友可以看到的护盾颜色，复活时随机抽取一个(格式为< R, G, B >)
+const array<vector> BUBBLE_COLOR_FRIENDLY =
+[
+    < 87, 151, 219 >,       // 这是默认的友方蓝色，像这样用半角逗号分隔即可
+    
+    < 0, 190, 0 >,          // 这是绿色，只是举个例子，可以删掉
+    < 128, 0, 128 >,        // 这是紫色，只是举个例子，可以删掉
+]
+
+// 在这里写敌人可以看到的护盾颜色
+const array<vector> BUBBLE_COLOR_ENEMY =
+[
+    < 255, 120, 32 >,       // 这是默认的敌对红色，像这样用半角逗号分隔即可
+
+    < 0, 190, 0 >,          // 这是绿色，只是举个例子，可以删掉
+    < 128, 0, 128 >,        // 这是紫色，只是举个例子，可以删掉
+]
+
+void function Titan_Respawn_Protection_Init()
+{
+    RegisterSignal( "TitanRespawnProtection" )
+    RegisterSignal( "TitanProtectionStart" )
+    RegisterSignal( "TitanProtectionEnd" )
+    RegisterSignal( "TitanSuicide" )
+
+    AddSpawnCallback( "npc_titan", OnTitanSpawned )
+}
+
+void function OnTitanSpawned( entity titan )
+{
+    //print( "RUNNING OnTitanSpawned()" )
+
+    // following are player titans( pet titans )
+	entity owner = GetPetTitanOwner( titan )
+	if( !IsValid( owner ) )
+		return
+    
+    bool respawnAsTitan = expect bool( owner.GetPersistentVar( "spawnAsTitan" ) ) || Riff_SpawnAsTitan() == 1
+    if ( !respawnAsTitan ) // player is not respawning as a titan! don't protect npcs
+        return
+
+	// check if player has a titan dropping, if not it means player disembarked and created their pet titans, don't give protection if so.
+	if ( "spawnWithoutSoul" in titan.s )
+	{
+        // this is defined in CreateAutoTitanForPlayer_ForTitanBecomesPilot(), mark the titan as "disembarked" not "hotdropping"
+		if ( expect bool ( titan.s.spawnWithoutSoul ) )
+			return
+	}
+
+    GiveTitanProtection( owner, titan )
+}
+
+void function GiveTitanProtection( entity player, entity titan )
+{
+    thread GiveTitanProtection_Threaded( player, titan )
+}
+
+void function GiveTitanProtection_Threaded( entity player, entity titan )
+{
+    //print( "RUNNING GiveTitanProtection_Threaded()" )
+    if ( PROTECTION_MAX_TIME == 0 )
+        return
+
+    player.EndSignal( "OnDestroy" )
+    player.EndSignal( "OnDeath" )
+    player.Signal( "TitanRespawnProtection" )
+    player.EndSignal( "TitanRespawnProtection" )
+
+    wait GetHotDropImpactTime( titan, "at_hotdrop_01" ) // this is the animation "RespawnAsTitan()" uses, wait for it
+
+    string message = PROTECTION_HINT
+    if ( SUICIDE_ENABLED )
+        message += SUICIDE_HINT
+    SendHudMessage( player, message, -1, -0.3, 255, 255, 0, 255, 0.5, 5, 0 ) // notify the player here
+    
+    // create a bubble here, for passing it to functions below
+    int team = titan.GetTeam()
+    vector origin = titan.GetOrigin()
+    vector angles = titan.GetAngles()
+    entity bubbleShield = CreateVisualBubbleShield( titan, team, origin, angles, 9999 )
+
+    waitthread ProtectHotDropNPCTitan( titan, bubbleShield ) // player will be transfered later, so we should protect npc titan temporarily
+    
+    if ( !player.IsTitan() ) // player still not respawned as titan, they're just doing titanfall
+    {
+        //print( "player is not a titan!" ) 
+        return
+    }
+    thread TryGiveProtectionToPlayer( player, bubbleShield )
+}
+
+void function ProtectHotDropNPCTitan( entity titan, entity bubbleShield = null )
+{
+    titan.EndSignal( "OnDestroy" )
+
+    table bubbleStat = {}
+    bubbleStat.validStart <- false
+    if ( IsValid( bubbleShield ) )
+        bubbleStat.validStart = true // if we pass a bubble shield, dont fade it
+    else
+    {
+        int team = titan.GetTeam()
+        vector origin = titan.GetOrigin()
+        vector angles = titan.GetAngles()
+        bubbleShield = CreateVisualBubbleShield( titan, team, origin, angles, 9999 )
+    }
+
+    bubbleShield.EndSignal( "OnDestroy" )
+
+    bubbleShield.NotSolid() // the bubble is actually not solid, so protect the titan manually
+    titan.SetInvulnerable() // protect the titan
+
+    OnThreadEnd
+    (
+        function(): ( titan, bubbleShield, bubbleStat )
+        {
+            if ( IsValid( titan ) )
+                titan.ClearInvulnerable()
+            if ( IsValid( bubbleShield ) && !bubbleStat.validStart ) // if we pass a bubble shield, dont fade it
+                DestroyBubbleShield( bubbleShield )
+        }
+    )
+
+    WaitTillHotDropComplete( titan ) // wait for titan actucally drop to ground
+}
+
+void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = null )
+{
+    //print( "RUNNING TryGiveProtectionToPlayer()" )
+
+    player.EndSignal( "OnDeath" )
+	player.EndSignal( "OnDestroy" )
+    player.EndSignal( "DisembarkingTitan" )
+    player.EndSignal( "OnPrimaryAttack" ) // wait for player attack
+    player.Signal( "TitanProtectionStart" )
+    player.EndSignal( "TitanProtectionStart" )
+    player.EndSignal( "TitanProtectionEnd" )
+
+    int team = player.GetTeam()
+    vector origin = player.GetOrigin()
+    vector angles = player.GetAngles()
+    if ( !IsValid( bubbleShield ) ) // if we pass a bubble shield, dont create it again
+	    bubbleShield = CreateVisualBubbleShield( player, team, origin, angles, 9999 ) // this bubble won't fade itself, controlled by other functions
+    bubbleShield.EndSignal( "OnDestroy" )
+    bubbleShield.NotSolid() // this bubble is not solid, only for visual
+    thread MonitorBubbleLifetime( player, bubbleShield )
+
+	player.SetNPCPriorityOverride( 10 )
+    if ( PROTECTION_NO_COLLISTION )
+        player.NotSolid() // don't let others collide with this protected player
+
+	OnThreadEnd
+    (
+		function () : ( player, bubbleShield )
+		{
+			DisableProtectionOnPlayer( player, bubbleShield )
+		}
+	)
+
+    string suicideHint = ""
+    if ( SUICIDE_ENABLED )
+        thread EnablePlayerTitanSuicide( player ) 
+
+    Melee_Disable( player ) // disable player's melee until they exit shield
+    SyncedMelee_Disable( player ) // disable player's execution
+    player.SetInvulnerable() // give protection to player
+    bubbleShield.SetParent( player, "ORIGIN" ) // give bubble visual
+
+    thread UpdatePlayerProtectionMessage( player )
+
+    table bubleshieldDotS = expect table( bubbleShield.s )
+	entity friendlyColoredFX = expect entity ( bubleshieldDotS.friendlyColoredFX )
+	entity enemyColoredFX = expect entity ( bubleshieldDotS.enemyColoredFX )
+	friendlyColoredFX.SetParent( bubbleShield )
+	enemyColoredFX.SetParent( bubbleShield )
+
+    if ( PROTECTION_MAX_TIME > 0 )
+    {
+	    wait PROTECTION_MAX_TIME
+        if ( SUICIDE_ENABLED )
+            waitthread PlayerOverTimeSuicide( player ) // if player is trying to suicide we don't cancel it
+        //print( "TryGiveProtectionToPlayer() Finished" )
+    }
+    else
+        WaitForever()
+}
+
+void function DisableProtectionOnPlayer( entity player, entity bubbleShield )
+{
+	DestroyBubbleShield( bubbleShield )
+
+	if ( IsAlive( player ) )
+    {
+        if ( GetGameState() == eGameState.Playing ) // don't update the message while in other states
+            SendHudMessage( player, "重生保护已结束",  -1, -0.3, 255, 255, 0, 255, 0.15, 5, 1 )
+
+		player.ClearNPCPriorityOverride()
+        thread DelayedReEnableSyncedMelee( player )
+    }
+
+    if ( IsValid( player ) )
+    {
+        player.Signal( "TitanProtectionEnd" ) // signal this
+        Melee_Enable( player )
+        if ( !IsAlive( player ) ) // player valid but they're dead
+        {
+            SyncedMelee_Enable( player ) // restore synced melee
+            //print( "player already dead, restoring SyncedMelee" )
+        }
+        player.Solid()
+        player.ClearInvulnerable()
+    }
+}
+
+void function MonitorBubbleLifetime( entity player, entity bubbleShield )
+{
+	bubbleShield.EndSignal( "OnDestroy" )
+    player.EndSignal( "OnDeath" )
+	player.EndSignal( "OnDestroy" )
+    player.EndSignal( "TitanProtectionEnd" )
+
+	vector startPos = player.GetOrigin()
+    float startTime = Time()
+	while( true )
+	{
+		if ( Distance( player.GetOrigin(), startPos ) > PROTECTION_MAX_DISTANCE ) // wait for dist runs out
+			break
+        if ( PROTECTION_MAX_TIME > 0 )
+        {
+            if ( Time() - startTime > PROTECTION_MAX_TIME ) // wait for time runs out
+                break
+        }
+
+		WaitFrame()
+	}
+
+    if ( SUICIDE_ENABLED )
+        waitthread PlayerOverTimeSuicide( player ) // player may want to suicide, wait and let them finish it
+
+    //print( "MonitorBubbleLifetime() Finished" )
+
+	DestroyBubbleShield( bubbleShield )
+}
+
+void function UpdatePlayerProtectionMessage( entity player )
+{
+    player.EndSignal( "OnDeath" )
+    player.EndSignal( "OnDestroy" )
+    player.EndSignal( "TitanProtectionEnd" )
+
+	vector startPos = player.GetOrigin()
+    float startTime = Time()
+
+    bool messageStarted = false
+    float replaceMsgAllowedTime = startTime + PROTECTION_HINT_MIN_DURATION
+
+    string defaultMessage = PROTECTION_HINT
+    if ( SUICIDE_ENABLED )
+        defaultMessage += SUICIDE_HINT
+	while( true )
+	{
+        string message = ""
+        
+        if ( PROTECTION_MAX_TIME > 0 )
+        {
+            float timePassed = Time() - startTime
+            if ( timePassed > PROTECTION_MAX_TIME * HINT_TIME_PERCENT || messageStarted ) // half time passed! if message has started we always display it
+            {
+                int timeLeft = int ( PROTECTION_MAX_TIME - timePassed ) + 1 // better +1 since we've cast it to int
+                message += "保护时间剩余: " + string( timeLeft ) + "\n"
+            }
+        }
+
+        float dist = Distance( player.GetOrigin(), startPos )
+		if ( dist > PROTECTION_MAX_DISTANCE * HINT_DISTANCE_PERCENT || messageStarted ) // half the distance traveled! if message has started we always display it
+        {
+            int distLeft = int ( PROTECTION_MAX_DISTANCE - dist ) + 1 // better +1 since we've cast it to int
+			message += "保护距离剩余: " + string( distLeft ) + "\n"
+        }
+
+        if ( message != "" && Time() > replaceMsgAllowedTime ) // first time the message is not empty and the min duration has passed we mark as player started message
+            messageStarted = true
+        
+        if ( GetGameState() == eGameState.Playing ) // don't update the message while in other states
+        {
+            if ( !player.UseButtonPressed() ) // player may trying to suicide
+            {
+                if ( messageStarted )
+                    SendHudMessage( player, message,  -1, -0.3, 255, 255, 0, 255, 0, 0.2, 0 )
+                else
+                    SendHudMessage( player, defaultMessage, -1, -0.3, 255, 255, 0, 255, 0, 0.2, 0 )
+            }
+        }
+
+		WaitFrame()
+	}
+}
+
+void function DelayedReEnableSyncedMelee( entity player )
+{
+    player.EndSignal( "TitanProtectionStart" ) // if another protection started we end this thread
+    player.EndSignal( "OnDestroy" )
+
+    wait EXECUTION_DELAY
+    SyncedMelee_Enable( player )
+}
+
+void function EnablePlayerTitanSuicide( entity player )
+{
+    player.EndSignal( "OnDeath" )
+	player.EndSignal( "OnDestroy" )
+    player.Signal( "TitanSuicide" )
+    player.EndSignal( "TitanSuicide" )
+    player.EndSignal( "TitanProtectionEnd" )
+
+    while ( true )
+    {
+        if ( player.UseButtonPressed() )
+            waitthread PlayerTryTitanSuicide( player )
+        WaitFrame()
+    }
+}
+
+void function PlayerOverTimeSuicide( entity player )
+{
+    while ( player.UseButtonPressed() )
+    {
+        //print ( "waiting for player suicide" )
+        WaitFrame()
+    }
+}
+
+void function PlayerTryTitanSuicide( entity player )
+{
+    float startTime = Time()
+    float endTime = startTime + SUICIDE_HOLD_TIME
+    float useTime = SUICIDE_HOLD_TIME
+
+    bool suicideSuccess = false
+    while ( player.UseButtonPressed() )
+    {
+        SendHudMessage( player, "正在进行自爆... [ " + CreateHudProgressStringThroughTime( Time(), startTime, useTime ) + " ]", -1, -0.3, 255, 255, 100, 255, 0, 0.2, 0 )
+        if ( Time() > endTime ) // time out!
+        {
+            suicideSuccess = true // mark as succeeded
+            break
+        }
+
+        WaitFrame()
+    }
+
+    if ( !suicideSuccess )
+        return
+
+    // if we reached here it means player have confirmed suiciding
+    // we don't want to waithread from EnablePlayerTitanSuicide() so do another thread
+    thread PlayerSuicide( player )
+}
+
+void function PlayerSuicide( entity player )
+{
+    player.EndSignal( "OnDestroy" )
+    player.EndSignal( "OnRespawned" )
+
+    player.Die( svGlobal.worldspawn, svGlobal.worldspawn, { damageSourceId = eDamageSourceId.round_end } ) // this damageSource won't trigger titan explosion effects
+    TransferPlayerToSpectator( player ) // prevent titan -> pilot transfering issues
+    WaitFrame() // wait a frame so other death functions can set up
+    thread RespawnAsTitan( player ) // respawn as titan again
+    if ( player.GetPlayerGameStat( PGS_DEATHS ) )
+        player.AddToPlayerGameStat( PGS_DEATHS, -1 ) // remove the death count
+}
+
+void function TransferPlayerToSpectator( entity player )
+{
+    asset model = player.GetModelName()
+    player.SetPlayerSettings( "spectator" ) // prevent titan -> pilot transfering issues
+    player.SetModel( model ) // so they will die as a titan ragdoll
+}
+
+string function CreateHudProgressStringThroughTime( float nowGlobalTime, float startGlobalTime, float totalTime )
+{
+    int barLength = 20
+    float progress = ( nowGlobalTime - startGlobalTime ) / totalTime
+    //print( "Total progress is: " + string( progress ) )
+    int numToReplace = int( barLength * progress )
+    //print( "numToReplace is: " + string( numToReplace ) )
+    string progessBar
+    for( int i = 0; i < barLength; i++ )
+    {
+        if( i <= numToReplace )
+            progessBar += "/"
+        else
+            progessBar += "-"
+    }
+    string tempBar = progessBar
+    return tempBar
+}
+
+// taken from _bubble_shield.gnut
+// to create a bubble without damages
+entity function CreateVisualBubbleShield( entity titan, int team, vector origin, vector angles, float fadeTime )
+{
+    entity bubbleShield = CreateEntity( "prop_dynamic" )
+	bubbleShield.SetValueForModelKey( $"models/fx/xo_shield.mdl" )
+    bubbleShield.kv.solid = SOLID_VPHYSICS
+	bubbleShield.kv.rendercolor = "81 130 151"
+	bubbleShield.kv.contents = (int(bubbleShield.kv.contents) | CONTENTS_NOGRAPPLE)
+	bubbleShield.SetOrigin( origin )
+	bubbleShield.SetAngles( angles )
+	DispatchSpawn( bubbleShield )
+	bubbleShield.Hide()
+
+	SetTeam( bubbleShield, team )
+	array<entity> bubbleShieldFXs
+
+	vector coloredFXOrigin = origin + Vector( 0, 0, 25 )
+	table bubbleShieldDotS = expect table( bubbleShield.s )
+	if ( team == TEAM_UNASSIGNED )
+	{
+		entity neutralColoredFX = StartParticleEffectInWorld_ReturnEntity( BUBBLE_SHIELD_FX_PARTICLE_SYSTEM_INDEX, coloredFXOrigin, <0, 0, 0> )
+		SetTeam( neutralColoredFX, team )
+		bubbleShieldDotS.neutralColoredFX <- neutralColoredFX
+		bubbleShieldFXs.append( neutralColoredFX )
+	}
+	else
+	{
+		//Create friendly and enemy colored particle systems
+		entity friendlyColoredFX = StartParticleEffectInWorld_ReturnEntity( BUBBLE_SHIELD_FX_PARTICLE_SYSTEM_INDEX, coloredFXOrigin, <0, 0, 0> )
+		SetTeam( friendlyColoredFX, team )
+		friendlyColoredFX.kv.VisibilityFlags = ENTITY_VISIBLE_TO_FRIENDLY
+        // change color
+        vector friendlyColor = BUBBLE_COLOR_FRIENDLY[ RandomInt( BUBBLE_COLOR_FRIENDLY.len() ) ]
+        EffectSetControlPointVector( friendlyColoredFX, 1, friendlyColor )
+
+		entity enemyColoredFX = StartParticleEffectInWorld_ReturnEntity( BUBBLE_SHIELD_FX_PARTICLE_SYSTEM_INDEX, coloredFXOrigin, <0, 0, 0> )
+		SetTeam( enemyColoredFX, team )
+		enemyColoredFX.kv.VisibilityFlags = ENTITY_VISIBLE_TO_ENEMY
+		// change color
+        vector enemyColor = BUBBLE_COLOR_ENEMY[ RandomInt( BUBBLE_COLOR_ENEMY.len() ) ]
+        EffectSetControlPointVector( enemyColoredFX, 1, enemyColor )
+
+		bubbleShieldDotS.friendlyColoredFX <- friendlyColoredFX
+		bubbleShieldDotS.enemyColoredFX <- enemyColoredFX
+		bubbleShieldFXs.append( friendlyColoredFX )
+		bubbleShieldFXs.append( enemyColoredFX )
+	}
+
+	#if MP
+	DisableTitanfallForLifetimeOfEntityNearOrigin( bubbleShield, origin, TITANHOTDROP_DISABLE_ENEMY_TITANFALL_RADIUS )
+	#endif
+
+	EmitSoundOnEntity( bubbleShield, "BubbleShield_Sustain_Loop" )
+
+    thread CleanupBubbleShield( bubbleShield, bubbleShieldFXs, fadeTime )
+
+    return bubbleShield
+}
+
+void function CleanupBubbleShield( entity bubbleShield, array<entity> bubbleShieldFXs, float fadeTime )
+{
+	bubbleShield.EndSignal( "OnDestroy" )
+
+	OnThreadEnd(
+		function () : ( bubbleShield, bubbleShieldFXs )
+		{
+			if ( IsValid_ThisFrame( bubbleShield ) )
+			{
+				StopSoundOnEntity( bubbleShield, "BubbleShield_Sustain_Loop" )
+				EmitSoundOnEntity( bubbleShield, "BubbleShield_End" )
+				DestroyBubbleShield( bubbleShield )
+			}
+
+			foreach ( fx in bubbleShieldFXs )
+			{
+				if ( IsValid_ThisFrame( fx ) )
+				{
+					EffectStop( fx )
+				}
+			}
+		}
+	)
+
+	wait fadeTime
+}
