@@ -8,11 +8,13 @@ const float PROTECTION_MAX_TIME             = 20
 const int PROTECTION_MAX_DISTANCE           = 2000
 // 保护期间其他玩家是否会与该玩家产生碰撞，子弹是否可穿过被保护的玩家(玩家本人仍会与其他玩家产生碰撞)
 const bool PROTECTION_NO_COLLISTION         = true
+// 保护期间，玩家为武器充能是否会取消护盾(如镭射炮、能量吸收和电浆磁轨炮)
+const bool CHARGE_BREAKS_PROTECTION         = true
 // 开局多久后复活的玩家才会触发重生保护，单位为秒
 const float PROTECTION_GRACE_PERIOD         = 10
 
 // 保护时的文字提示(根据显示百分比的设置，将会转为显示玩家的剩余时间和距离)
-const string PROTECTION_HINT                = "启用重生保护：\n你将在第一次开火前保持无敌(不可近战或处决)，可移动一定距离\n"
+const string PROTECTION_HINT                = "启用重生保护：\n你将在第一次攻击或为武器充电前保持无敌(不可近战或处决)，可移动一定距离\n"
 // 文字提示被剩余时间替换前最少可以存在多久，可以让玩家在距离设定很低的情况下也看清提示，单位为秒
 const float PROTECTION_HINT_MIN_DURATION    = 8
 // 若保护时间达到了这个百分比，将显示"保护时间剩余"的提示
@@ -184,7 +186,7 @@ void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = nu
     bubbleShield.EndSignal( "OnDestroy" )
     bubbleShield.NotSolid() // this bubble is not solid, only for visual
     thread MonitorBubbleLifetime( player, bubbleShield )
-    thread CheckPlayerVortexWeapon( player )
+    thread CheckPlayerChargeWeapon( player )
 
 	player.SetNPCPriorityOverride( 10 )
     if ( PROTECTION_NO_COLLISTION )
@@ -292,7 +294,7 @@ const array<string> VORTEX_WEAPONS =
     "mp_titanweapon_heat_shield",
 ]
 
-void function CheckPlayerVortexWeapon( entity player )
+void function CheckPlayerChargeWeapon( entity player )
 {
     player.EndSignal( "OnDeath" )
 	player.EndSignal( "OnDestroy" )
@@ -308,6 +310,20 @@ void function CheckPlayerVortexWeapon( entity player )
             {
                 player.Signal( "OnPrimaryAttack" ) // manually signal this, end protection
                 return
+            }
+
+            if ( CHARGE_BREAKS_PROTECTION )
+            {
+                bool chargeWeapon = activeWeapon.IsChargeWeapon()
+                if ( chargeWeapon )
+                {
+                    float chargeFrac = activeWeapon.GetWeaponChargeFraction()
+                    if ( chargeFrac > 0.0 ) // player started weapon charge
+                    {
+                        player.Signal( "OnPrimaryAttack" ) // manually signal this, end protection
+                            return
+                    }
+                }
             }
         }
         WaitFrame()
