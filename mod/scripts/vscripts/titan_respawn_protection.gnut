@@ -232,7 +232,7 @@ void function DisableProtectionOnPlayer( entity player, entity bubbleShield )
 	if ( IsAlive( player ) )
     {
         if ( GetGameState() == eGameState.Playing ) // don't update the message while in other states
-            SendHudMessage( player, "重生保护已结束",  -1, -0.3, 255, 255, 0, 255, 0.15, 5, 1 )
+            SendHudMessage( player, "重生保护已结束",  -1, -0.3, 255, 255, 0, 255, 0.15, 3, 1 )
 
 		player.ClearNPCPriorityOverride()
         thread DelayedReEnableSyncedMelee( player )
