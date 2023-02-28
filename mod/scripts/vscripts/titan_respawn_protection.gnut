@@ -8,6 +8,8 @@ const float PROTECTION_MAX_TIME             = 20
 const int PROTECTION_MAX_DISTANCE           = 2000
 // 保护期间其他玩家是否会与该玩家产生碰撞，子弹是否可穿过被保护的玩家(玩家本人仍会与其他玩家产生碰撞)
 const bool PROTECTION_NO_COLLISTION         = true
+// 开局多久后复活的玩家才会触发重生保护，单位为秒
+const float PROTECTION_GRACE_PERIOD         = 10
 
 // 保护时的文字提示(根据显示百分比的设置，将会转为显示玩家的剩余时间和距离)
 const string PROTECTION_HINT                = "启用重生保护：\n你将在第一次开火前保持无敌(不可近战或处决)，可移动一定距离\n"
@@ -18,8 +20,6 @@ const float HINT_TIME_PERCENT               = 0.75
 // 若移动距离达到了这个百分比，将显示"保护距离剩余"的提示
 const float HINT_DISTANCE_PERCENT           = 0.75
 
-// 开局多久后复活的玩家才会触发重生保护，单位为秒
-const float PROTECTION_GRACE_PERIOD         = 10
 // 保护结束后，玩家还需等待多久才可以处决，单位为秒
 const int EXECUTION_DELAY                   = 2
 
@@ -41,7 +41,7 @@ const array<vector> BUBBLE_COLOR_FRIENDLY =
     < 128, 0, 128 >,        // 这是紫色，只是举个例子，可以删掉
 ]
 
-// 在这里写敌人可以看到的护盾颜色
+// 在这里写敌人可以看到的护盾颜色，复活时随机抽取一个(格式为< R, G, B >)
 const array<vector> BUBBLE_COLOR_ENEMY =
 [
     < 255, 120, 32 >,       // 这是默认的敌对红色，像这样用半角逗号分隔即可
@@ -325,7 +325,7 @@ void function UpdatePlayerProtectionMessage( entity player )
         
         if ( GetGameState() == eGameState.Playing ) // don't update the message while in other states
         {
-            if ( !player.UseButtonPressed() ) // player may trying to suicide
+            if ( !( player.UseButtonPressed() && suicideEnable ) ) // player may trying to suicide, dont update these messages if so
             {
                 if ( messageStarted )
                     SendHudMessage( player, message,  -1, -0.3, 255, 255, 0, 255, 0, 0.2, 0 )
