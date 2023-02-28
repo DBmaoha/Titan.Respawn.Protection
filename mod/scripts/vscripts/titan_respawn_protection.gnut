@@ -11,13 +11,15 @@ const bool PROTECTION_NO_COLLISTION         = true
 
 // 保护时的文字提示(根据显示百分比的设置，将会转为显示玩家的剩余时间和距离)
 const string PROTECTION_HINT                = "启用重生保护：\n你将在第一次开火前保持无敌(不可近战或处决)，可移动一定距离\n"
-// 文字提示被剩余时间替换前最少可以存在多久，可以让玩家在距离设定很低的情况下也看清提示
+// 文字提示被剩余时间替换前最少可以存在多久，可以让玩家在距离设定很低的情况下也看清提示，单位为秒
 const float PROTECTION_HINT_MIN_DURATION    = 8
 // 若保护时间达到了这个百分比，将显示"保护时间剩余"的提示
 const float HINT_TIME_PERCENT               = 0.75
 // 若移动距离达到了这个百分比，将显示"保护距离剩余"的提示
 const float HINT_DISTANCE_PERCENT           = 0.75
 
+// 开局多久后复活的玩家才会触发重生保护，单位为秒
+const float PROTECTION_GRACE_PERIOD         = 10
 // 保护结束后，玩家还需等待多久才可以处决，单位为秒
 const int EXECUTION_DELAY                   = 2
 
@@ -27,12 +29,14 @@ const bool SUICIDE_ENABLED                  = true
 const string SUICIDE_HINT                   = "若对重生点仍不满意，长按 下机 可以进行自爆并重新复活"
 // 自爆所需的按键时长
 const float SUICIDE_HOLD_TIME               = 1.5
+// 开局多久后复活的玩家才可以选择自爆，单位为秒
+const float SUICIDE_GRACE_PERIOD            = 30
 
 // 在这里写队友可以看到的护盾颜色，复活时随机抽取一个(格式为< R, G, B >)
 const array<vector> BUBBLE_COLOR_FRIENDLY =
 [
     < 87, 151, 219 >,       // 这是默认的友方蓝色，像这样用半角逗号分隔即可
-    
+
     < 0, 190, 0 >,          // 这是绿色，只是举个例子，可以删掉
     < 128, 0, 128 >,        // 这是紫色，只是举个例子，可以删掉
 ]
@@ -90,6 +94,11 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
     //print( "RUNNING GiveTitanProtection_Threaded()" )
     if ( PROTECTION_MAX_TIME == 0 )
         return
+    if ( PROTECTION_GRACE_PERIOD > 0 )
+    {
+        if ( GameTime_PlayingTime() < PROTECTION_GRACE_PERIOD )
+            return
+    }
 
     player.EndSignal( "OnDestroy" )
     player.EndSignal( "OnDeath" )
@@ -98,8 +107,9 @@ void function GiveTitanProtection_Threaded( entity player, entity titan )
 
     wait GetHotDropImpactTime( titan, "at_hotdrop_01" ) // this is the animation "RespawnAsTitan()" uses, wait for it
 
+    bool suicideEnable = SUICIDE_ENABLED && GameTime_PlayingTime() >= SUICIDE_GRACE_PERIOD
     string message = PROTECTION_HINT
-    if ( SUICIDE_ENABLED )
+    if ( suicideEnable )
         message += SUICIDE_HINT
     SendHudMessage( player, message, -1, -0.3, 255, 255, 0, 255, 0.5, 5, 0 ) // notify the player here
     
@@ -187,8 +197,8 @@ void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = nu
 		}
 	)
 
-    string suicideHint = ""
-    if ( SUICIDE_ENABLED )
+    bool suicideEnable = SUICIDE_ENABLED && GameTime_PlayingTime() >= SUICIDE_GRACE_PERIOD
+    if ( suicideEnable )
         thread EnablePlayerTitanSuicide( player ) 
 
     Melee_Disable( player ) // disable player's melee until they exit shield
@@ -207,7 +217,7 @@ void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = nu
     if ( PROTECTION_MAX_TIME > 0 )
     {
 	    wait PROTECTION_MAX_TIME
-        if ( SUICIDE_ENABLED )
+        if ( suicideEnable )
             waitthread PlayerOverTimeSuicide( player ) // if player is trying to suicide we don't cancel it
         //print( "TryGiveProtectionToPlayer() Finished" )
     }
@@ -249,6 +259,7 @@ void function MonitorBubbleLifetime( entity player, entity bubbleShield )
 	player.EndSignal( "OnDestroy" )
     player.EndSignal( "TitanProtectionEnd" )
 
+    bool suicideEnable = SUICIDE_ENABLED && GameTime_PlayingTime() >= SUICIDE_GRACE_PERIOD
 	vector startPos = player.GetOrigin()
     float startTime = Time()
 	while( true )
@@ -264,7 +275,7 @@ void function MonitorBubbleLifetime( entity player, entity bubbleShield )
 		WaitFrame()
 	}
 
-    if ( SUICIDE_ENABLED )
+    if ( suicideEnable )
         waitthread PlayerOverTimeSuicide( player ) // player may want to suicide, wait and let them finish it
 
     //print( "MonitorBubbleLifetime() Finished" )
@@ -284,8 +295,9 @@ void function UpdatePlayerProtectionMessage( entity player )
     bool messageStarted = false
     float replaceMsgAllowedTime = startTime + PROTECTION_HINT_MIN_DURATION
 
+    bool suicideEnable = SUICIDE_ENABLED && GameTime_PlayingTime() >= SUICIDE_GRACE_PERIOD
     string defaultMessage = PROTECTION_HINT
-    if ( SUICIDE_ENABLED )
+    if ( suicideEnable )
         defaultMessage += SUICIDE_HINT
 	while( true )
 	{
