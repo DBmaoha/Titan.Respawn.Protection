@@ -238,9 +238,9 @@ void function TryGiveProtectionToPlayer( entity player, entity bubbleShield = nu
 
     thread UpdatePlayerProtectionMessage( player )
 
-    table bubleshieldDotS = expect table( bubbleShield.s )
-	entity friendlyColoredFX = expect entity ( bubleshieldDotS.friendlyColoredFX )
-	entity enemyColoredFX = expect entity ( bubleshieldDotS.enemyColoredFX )
+    table bubbleshieldDotS = expect table( bubbleShield.s )
+	entity friendlyColoredFX = expect entity ( bubbleshieldDotS.friendlyColoredFX )
+	entity enemyColoredFX = expect entity ( bubbleshieldDotS.enemyColoredFX )
 	friendlyColoredFX.SetParent( bubbleShield )
 	enemyColoredFX.SetParent( bubbleShield )
 
@@ -479,10 +479,19 @@ void function PlayerSuicide( entity player )
     player.EndSignal( "OnRespawned" )
 
     player.Die( svGlobal.worldspawn, svGlobal.worldspawn, { damageSourceId = eDamageSourceId.round_end } ) // this damageSource won't trigger titan explosion effects
+    PlayerChangeToSpectatorClass( player ) // prevent a crash with going from titan => pilot on respawn
     WaitFrame() // wait a frame so other death functions can set up
     thread ReplacePlayerAsTitan( player ) // respawn as titan again
     if ( player.GetPlayerGameStat( PGS_DEATHS ) )
         player.AddToPlayerGameStat( PGS_DEATHS, -1 ) // remove the death count
+}
+
+void function PlayerChangeToSpectatorClass( entity player )
+{
+    asset model = player.GetModelName()
+    // this can't be done right before player becoming a titan! will cause their sound to be "out of titan" style, which makes most things too loud
+    player.SetPlayerSettings( "spectator" ) 
+    player.SetModel( model ) // restore titan ragdoll model
 }
 
 string function CreateHudProgressStringThroughTime( float nowGlobalTime, float startGlobalTime, float totalTime )
@@ -652,7 +661,6 @@ void function ReplacePlayerAsTitan( entity player )
 	
 	waitthread TitanHotDrop( titan, "at_hotdrop_01", spawnpoint.GetOrigin(), spawnpoint.GetAngles(), player, camera ) // do hotdrop anim
 	
-	player.SetPlayerSettings( "spectator" ) // prevent a crash with going from titan => pilot on respawn
 	player.RespawnPlayer( null ) // spawn player as pilot so they get their pilot loadout on embark
 	player.SetOrigin( titan.GetOrigin() )
 	ClearTitanAvailable( player ) // titanfall succeed, clear titan availability
