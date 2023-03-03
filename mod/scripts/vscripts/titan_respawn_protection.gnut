@@ -608,6 +608,7 @@ void function ReplacePlayerAsTitan( entity player )
 	if ( IsAlive( player ) ) 
         return
 
+    player.Signal( "OnRespawned" ) // kill any postdeaththreads that could be running
 	player.Signal( "PlayerRespawnStarted" )
 
 	player.isSpawning = true
