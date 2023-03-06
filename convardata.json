@@ -1,0 +1,95 @@
+{
+	"Name": "Titan Respawn Protection",
+	"Description": "Try to protect you from most dangers",
+	"LoadPriority": 1,
+	"RequiredOnClient": false,
+	"Version": "1.0.0",
+
+	"ConVars": [
+		{
+			// 保护持续时间(为负值则为无限持续，即直至被手动取消会一直存在，为0则关闭)
+			"Name": "protection_max_time",
+			"DefaultValue": "20"
+		},
+		{
+			// 玩家最多能携带护盾移动多少距离，这里的单位是游戏内计量单位
+			"Name": "protection_max_distance",
+			"DefaultValue": "2000"
+		},
+		{
+			// 保护期间其他玩家是否会与该玩家产生碰撞，子弹是否可穿过被保护的玩家(玩家本人仍会与其他玩家产生碰撞)
+			"Name": "protection_no_collision",
+			"DefaultValue": "true"
+		},
+		{
+			// 圆顶护罩是否有实质效果，若为否则只有视觉
+			"Name": "protection_dome_solid",
+			"DefaultValue": "false"
+		},
+		{
+			// 保护期间，玩家为武器充能是否会取消护盾(如镭射炮、能量吸收和电浆磁轨炮)
+			"Name": "charge_breaks_protection",
+			"DefaultValue": "true"
+		},
+		{
+			// 开局多久后复活的玩家才会触发重生保护，单位为秒
+			"Name": "protection_grace_period",
+			"DefaultValue": "10"
+		},
+		{
+			// 保护时的文字提示(根据显示百分比的设置，将会转为显示玩家的剩余时间和距离)
+			"Name": "protection_hint",
+			"DefaultValue": "启用重生保护：\n你将在第一次攻击或为武器充电前保持无敌(不可近战或处决)，可移动一定距离\n"
+		},
+		{
+			// 文字提示被剩余时间替换前最少可以存在多久，可以让玩家在距离设定很低的情况下也看清提示，单位为秒
+			"Name": "protection_min_duration",
+			"DefaultValue": "8.0"
+		},
+		{
+			// 若保护时间达到了这个百分比，将显示"保护时间剩余"的提示
+			"Name": "hint_time_percent",
+			"DefaultValue": "0.75"
+		},
+		{
+			// 若移动距离达到了这个百分比，将显示"保护距离剩余"的提示
+			"Name": "hint_distance_percent",
+			"DefaultValue": "0.75"
+		},
+		{
+			// 保护结束后，玩家还需等待多久才可以处决，单位为秒
+			"Name": "execution_delay",
+			"DefaultValue": "2.0"
+		},
+		{
+			// 是否允许保护期间自爆
+			"Name": "suicide_enable",
+			"DefaultValue": "true"
+		},
+		{
+			// 若启用自爆，额外增加的文字提示
+			"Name": "suicide_hint",
+			"DefaultValue": "若对重生点仍不满意，长按 下机 可以进行自爆并重新复活"
+		},
+		{
+			// 自爆所需的按键时长
+			"Name": "suicide_hold_time",
+			"DefaultValue": "1.5"
+		},
+		{
+			// 开局多久后复活的玩家才可以选择自爆，单位为秒
+			"Name": "suicide_grace_period",
+			"DefaultValue": "30.0"
+		}
+	],
+
+	"Scripts": [
+		{
+			"Path": "titan_respawn_protection.gnut",
+			"RunOn": "SERVER && MP",
+			"ServerCallback": {
+				"After": "Titan_Respawn_Protection_Init"
+			}
+		}
+	]
+}
