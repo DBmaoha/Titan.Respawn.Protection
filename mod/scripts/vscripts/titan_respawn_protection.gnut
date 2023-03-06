@@ -33,7 +33,7 @@ const bool SUICIDE_ENABLED                  = true
 const string SUICIDE_HINT                   = "若对重生点不满意，长按 下机 可以进行自爆并重新复活"
 // 自爆所需的按键时长
 const float SUICIDE_HOLD_TIME               = 1.5
-// 是否在玩家尝试自爆时保持保护(开启：按住自爆时,超出时间或超出距离依然会保持护盾，以防玩家误触导致无法自爆)
+// 是否在玩家尝试自爆时保持保护(开启：按住自爆时，超出时间或超出距离依然会保持护盾，以防玩家误触导致无法自爆)
 const bool SUICIDE_OVERTIME_ENABLED         = true
 // 开局多久后复活的玩家才可以选择自爆，单位为秒
 const float SUICIDE_GRACE_PERIOD            = 30.0
